@@ -1,0 +1,416 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Vedic Patha Recital + Text‑to‑Speech</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 24px; }
+    h1 { font-size: 1.4rem; margin-bottom: 0.5rem; }
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    textarea, select, input[type="text"], input[type="number"] { width: 100%; padding: 8px; font-size: 1rem; }
+    button { padding: 8px 12px; margin-right: 8px; }
+    .panel { border: 1px solid #ccc; border-radius: 8px; padding: 16px; }
+    ol { margin: 0; padding-left: 1.2rem; }
+    .small { font-size: 0.9rem; color: gray; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; background: rgba(127,127,127,.15); padding: 8px; border-radius: 6px; }
+    
+    /* Word Visualization Styles */
+    .word-viz { 
+      min-height: 120px; 
+      padding: 16px; 
+      background: rgba(127,127,127,.05); 
+      border-radius: 6px; 
+      display: flex; 
+      flex-wrap: wrap; 
+      gap: 8px; 
+      align-items: flex-end;
+      justify-content: center;
+    }
+    
+    .word-dot { 
+      width: 20px; 
+      height: 20px; 
+      border-radius: 50%; 
+      background: #666; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      font-size: 10px; 
+      color: white; 
+      font-weight: bold; 
+      cursor: pointer; 
+      transition: all 0.2s ease;
+      position: relative;
+    }
+    
+    .word-dot:hover { 
+      background: #444; 
+      transform: scale(1.1); 
+    }
+    
+    .word-dot.active { 
+      background: #ff6b35; 
+      animation: bounce 0.6s ease-in-out; 
+    }
+    
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0) scale(1); }
+      25% { transform: translateY(-15px) scale(1.2); }
+      50% { transform: translateY(-25px) scale(1.3); }
+      75% { transform: translateY(-10px) scale(1.1); }
+    }
+  </style>
+</head>
+<body>
+  <h1>Vedic Patha Recital Generator + Browser TTS</h1>
+  <p class="small">Enter a mantra (space‑separated words), choose a Patha, generate steps, and use Text‑to‑Speech to recite.</p>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>Mantra</h2>
+      <textarea id="mantraInput" rows="3">tat savitur varenyam bhargo devasya dhimahi</textarea>
+      <div class="row" style="margin-top:8px;">
+        <label for="pathaSelect"><strong>Patha:</strong></label>
+        <select id="pathaSelect"></select>
+        <button id="generateBtn">Generate</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Text‑to‑Speech</h2>
+      <div class="row">
+        <label for="voiceSelect">Voice:</label>
+        <select id="voiceSelect"></select>
+      </div>
+      <div class="row">
+        <label for="langInput">Lang:</label>
+        <input id="langInput" type="text" value="sa-IN" />
+        <span class="small">Try <code class="code">sa-IN</code>, <code class="code">hi-IN</code>, or your system default.</span>
+      </div>
+      <div class="row">
+        <label for="rateInput">Rate:</label>
+        <input id="rateInput" type="number" value="1" step="0.1" min="0.5" max="2.0" />
+        <label for="pitchInput">Pitch:</label>
+        <input id="pitchInput" type="number" value="1" step="0.1" min="0.1" max="2.0" />
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button id="speakBtn">Speak (All)</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="resumeBtn">Resume</button>
+        <button id="stopBtn">Stop</button>
+      </div>
+      <p id="ttsSupport" class="small"></p>
+    </div>
+
+    <div class="panel">
+      <h2>Generated Recital</h2>
+      <p class="small">Steps for the selected Patha:</p>
+      <ol id="stepsList"></ol>
+      <div class="row" style="margin-top:8px;">
+        <button id="copyBtn">Copy Steps</button>
+        <button id="exportCsvBtn">Export CSV</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Word Visualization</h2>
+      <p class="small">Each dot represents a word. Dots bounce when the word is being recited.</p>
+      <div id="wordVisualization" class="word-viz"></div>
+      <div class="row" style="margin-top:8px;">
+        <button id="speakVisualBtn">Speak with Animation</button>
+        <button id="pauseVisualBtn">Pause</button>
+        <button id="stopVisualBtn">Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // -----------------------
+    // Patterns (formulas)
+    // -----------------------
+    const patterns = {
+      "samhita": { window: 1, stride: 1, clauses: [["$1"]] },
+      "pada":    { window: 1, stride: 1, clauses: [["$1"]] },
+      "krama":   { window: 2, stride: 1, clauses: [["$1","$2"]] },
+      "jata":    {
+        window: 2, stride: 1,
+        clauses: [["$1","$2"],["$2","$1"],["$1","$2"]]
+      },
+      "ghana":   {
+        window: 3, stride: 1,
+        clauses: [
+          ["$1","$2"],
+          ["$2","$1"],
+          ["$1","$2","$3"],
+          ["$2","$3"],
+          ["$3","$2"],
+          ["$2","$3"],
+          ["$1","$2","$3"]
+        ]
+      },
+      // Additional Vikruti encodings (illustrative)
+      "mala":    { window: 3, stride: 1, clauses: [["$1","$2"],["$2","$3"],["$3","$2"],["$2","$1"]] },
+      "shikha":  { window: 3, stride: 1, clauses: [["$1","$2","$3"],["$2","$3","$1"],["$3","$1","$2"]] },
+      "rekha":   { window: 3, stride: 1, clauses: [["$1","$2"],["$2","$3"],["$1","$2","$3"]] },
+      "dhvaja":  { window: 3, stride: 1, clauses: [["$1","$2"],["$2","$1"],["$1","$2","$3"],["$3","$2","$1"]] },
+      "danda":   { window: 2, stride: 1, clauses: [["$1","$2"],["$2","$1"]] },
+      "ratha":   { window: 3, stride: 1, clauses: [["$1","$2","$3"],["$3","$2","$1"],["$1","$3","$2"]] }
+    };
+
+    // -----------------------
+    // Expansion Engine
+    // -----------------------
+    function tokenizeMantra(input) {
+      // Split on whitespace; filter empty tokens
+      return input.trim().split(/\s+/).filter(Boolean);
+    }
+
+    function expandPattern(tokens, pattern) {
+      const window = pattern.window;
+      const stride = pattern.stride ?? 1;
+      const clauses = pattern.clauses;
+      const out = [];
+
+      for (let i = 0; i + window <= tokens.length; i += stride) {
+        const win = tokens.slice(i, i + window);
+        for (const clause of clauses) {
+          const step = clause.map(ref => {
+            if (typeof ref === "string" && /^\$\d+$/.test(ref)) {
+              const idx = parseInt(ref.slice(1), 10) - 1;
+              return win[idx];
+            }
+            return String(ref); // allow literals if needed
+          });
+          out.push(step);
+        }
+      }
+      return out;
+    }
+
+    function stringifySteps(steps, sep = " ") {
+      return steps.map(step => step.join(sep));
+    }
+
+    // -----------------------
+    // UI Wiring
+    // -----------------------
+    const mantraInput = document.getElementById("mantraInput");
+    const pathaSelect = document.getElementById("pathaSelect");
+    const generateBtn = document.getElementById("generateBtn");
+    const stepsList = document.getElementById("stepsList");
+
+    const voiceSelect = document.getElementById("voiceSelect");
+    const langInput = document.getElementById("langInput");
+    const rateInput = document.getElementById("rateInput");
+    const pitchInput = document.getElementById("pitchInput");
+    const ttsSupport = document.getElementById("ttsSupport");
+
+    const speakBtn = document.getElementById("speakBtn");
+    const pauseBtn = document.getElementById("pauseBtn");
+    const resumeBtn = document.getElementById("resumeBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const copyBtn = document.getElementById("copyBtn");
+    const exportCsvBtn = document.getElementById("exportCsvBtn");
+    
+    // Word Visualization elements
+    const wordVisualization = document.getElementById("wordVisualization");
+    const speakVisualBtn = document.getElementById("speakVisualBtn");
+    const pauseVisualBtn = document.getElementById("pauseVisualBtn");
+    const stopVisualBtn = document.getElementById("stopVisualBtn");
+
+    // Populate Patha selector
+    Object.keys(patterns).forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      pathaSelect.appendChild(opt);
+    });
+    pathaSelect.value = "jata";
+
+    let currentLines = [];
+    let uniqueWords = [];
+    let wordDots = new Map();
+
+    function createWordVisualization(tokens) {
+      // Get unique words from the mantra
+      uniqueWords = [...new Set(tokens)];
+      wordVisualization.innerHTML = "";
+      wordDots.clear();
+      
+      uniqueWords.forEach((word, index) => {
+        const dot = document.createElement("div");
+        dot.className = "word-dot";
+        dot.textContent = (index + 1).toString();
+        dot.title = word;
+        dot.dataset.word = word;
+        wordVisualization.appendChild(dot);
+        wordDots.set(word, dot);
+      });
+    }
+
+    function animateWord(word) {
+      const dot = wordDots.get(word);
+      if (dot) {
+        dot.classList.remove("active");
+        // Force reflow to restart animation
+        dot.offsetHeight;
+        dot.classList.add("active");
+        
+        // Remove active class after animation
+        setTimeout(() => {
+          dot.classList.remove("active");
+        }, 600);
+      }
+    }
+
+    function renderSteps(lines) {
+      stepsList.innerHTML = "";
+      lines.forEach((line, idx) => {
+        const li = document.createElement("li");
+        li.textContent = line;
+        stepsList.appendChild(li);
+      });
+    }
+
+    generateBtn.addEventListener("click", () => {
+      const tokens = tokenizeMantra(mantraInput.value);
+      const pattern = patterns[pathaSelect.value];
+      const steps = expandPattern(tokens, pattern);
+      const lines = stringifySteps(steps);
+      currentLines = lines;
+      renderSteps(lines);
+      createWordVisualization(tokens);
+    });
+
+    // -----------------------
+    // Text‑to‑Speech (Web Speech API)
+    // -----------------------
+    const synth = window.speechSynthesis;
+    if (!synth) {
+      ttsSupport.textContent = "Your browser does not support Speech Synthesis.";
+    } else {
+      ttsSupport.textContent = "Speech Synthesis available. Voices may load asynchronously.";
+    }
+
+    let voices = [];
+    function loadVoices() {
+      voices = synth ? synth.getVoices() : [];
+      voiceSelect.innerHTML = "";
+      voices.forEach((v, i) => {
+        const opt = document.createElement("option");
+        opt.value = i;
+        opt.textContent = `${v.name} (${v.lang})${v.default ? " [default]" : ""}`;
+        voiceSelect.appendChild(opt);
+      });
+      // Try to preselect Sanskrit/Hindi if available
+      const saIndex = voices.findIndex(v => v.lang.toLowerCase().startsWith("sa"));
+      const hiIndex = voices.findIndex(v => v.lang.toLowerCase().startsWith("hi"));
+      voiceSelect.value = saIndex >= 0 ? saIndex : (hiIndex >= 0 ? hiIndex : 0);
+    }
+
+    if (synth) {
+      loadVoices();
+      // Some browsers fire voiceschanged after a delay
+      synth.onvoiceschanged = loadVoices;
+    }
+
+    function speakLines(lines) {
+      if (!synth) return;
+      synth.cancel(); // clear queue
+      const lang = langInput.value || undefined;
+      const rate = parseFloat(rateInput.value) || 1;
+      const pitch = parseFloat(pitchInput.value) || 1;
+      const selectedVoice = voices[parseInt(voiceSelect.value, 10)];
+
+      lines.forEach(text => {
+        const u = new SpeechSynthesisUtterance(text);
+        if (selectedVoice) u.voice = selectedVoice;
+        if (lang) u.lang = lang;
+        u.rate = rate;
+        u.pitch = pitch;
+        synth.speak(u);
+      });
+    }
+
+    function speakLinesWithAnimation(lines) {
+      if (!synth) return;
+      synth.cancel(); // clear queue
+      const lang = langInput.value || undefined;
+      const rate = parseFloat(rateInput.value) || 1;
+      const pitch = parseFloat(pitchInput.value) || 1;
+      const selectedVoice = voices[parseInt(voiceSelect.value, 10)];
+
+      lines.forEach((text, lineIndex) => {
+        const u = new SpeechSynthesisUtterance(text);
+        if (selectedVoice) u.voice = selectedVoice;
+        if (lang) u.lang = lang;
+        u.rate = rate;
+        u.pitch = pitch;
+        
+        // Add animation for each word in the line
+        u.onstart = () => {
+          const words = text.split(/\s+/);
+          words.forEach((word, wordIndex) => {
+            setTimeout(() => {
+              animateWord(word);
+            }, wordIndex * 300); // Stagger animations within each line
+          });
+        };
+        
+        synth.speak(u);
+      });
+    }
+
+    speakBtn.addEventListener("click", () => {
+      if (!currentLines.length) {
+        generateBtn.click();
+      }
+      speakLines(currentLines);
+    });
+
+    speakVisualBtn.addEventListener("click", () => {
+      if (!currentLines.length) {
+        generateBtn.click();
+      }
+      speakLinesWithAnimation(currentLines);
+    });
+
+    pauseVisualBtn.addEventListener("click", () => synth && synth.pause());
+    stopVisualBtn.addEventListener("click", () => synth && synth.cancel());
+
+    pauseBtn.addEventListener("click", () => synth && synth.pause());
+    resumeBtn.addEventListener("click", () => synth && synth.resume());
+    stopBtn.addEventListener("click", () => synth && synth.cancel());
+
+    // Copy & Export
+    copyBtn.addEventListener("click", async () => {
+      const text = currentLines.join("\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => (copyBtn.textContent = "Copy Steps"), 1200);
+      } catch (e) {
+        alert("Copy failed. Select and copy manually:\n\n" + text);
+      }
+    });
+
+    exportCsvBtn.addEventListener("click", () => {
+      const rows = [["step","recital"], ...currentLines.map((l,i)=>[i+1,l])];
+      const csv = rows.map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `recital_${pathaSelect.value}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    // Generate on load for convenience
+    generateBtn.click();
+  </script>
+</body>
+</html>
